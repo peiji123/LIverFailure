@@ -1,0 +1,246 @@
+import transtab
+import json
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from transtab.evaluator import predict_multi_task
+from Result_process.metrics_process import metrics_with_youden, metrics_multiclass
+import torch.optim as optim
+from sklearn.metrics import accuracy_score, recall_score, f1_score,roc_auc_score, confusion_matrix,\
+    cohen_kappa_score, matthews_corrcoef, precision_score
+import numpy as np
+import itertools
+from tabpfn import TabPFNClassifier
+import torch
+import torch.nn as nn
+from tab_transformer_pytorch import FTTransformer, TabTransformer
+import torch.optim as optim
+from child_class import GateChildHead
+import itertools
+
+def custrm_metric(y_true, pred):
+    y_pred = np.argmax(pred, axis=1)
+    cm = confusion_matrix(y_true, y_pred)
+    auc = roc_auc_score(y_true, pred, multi_class='ovr')
+    n_classes = 3
+
+    # y_true_onehot = np.eye(n_classes)[y_true]  # Convert y_true to one-hot encoding
+    # auc_scores = []
+    # for class_idx in range(n_classes):
+    #     auc = roc_auc_score(y_true_onehot[:, class_idx], pred_prob[:, class_idx])
+    #     auc_scores.append(auc)
+    # auc_avg = np.mean(auc_scores)
+    metrics_value = cm[1,1] + cm[2,2]- cm[2,0]
+    return metrics_value, cm[2,2], cm[1,1]
+
+class EarlyStopping:
+    def __init__(self, patience=5, delta=0):
+        self.patience = patience
+        self.delta = delta
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+    def __call__(self, score):
+        if self.best_score is None:
+            self.best_score = score
+        elif score < self.best_score - self.delta:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.counter = 0
+
+
+
+info = json.load(open('../data_process/info_0603.json'))
+cate_cols = info['cate_cols']
+num_cols = info['cont_cols']
+bin_cols = info['bin_cols']
+
+df_PHLF_valid_grade = pd.read_csv('../data_process/df_PHLF_valid_grade.csv')
+df_PHLF_extvalid_grade = pd.read_csv('../data_process/df_PHLF_extvalid_grade.csv')
+df_PHLF_train_with_grade = pd.read_csv('../data_process/df_PHLF_train_with_grade.csv')
+
+train_data, valid_data = train_test_split(df_PHLF_train_with_grade, test_size=0.2, random_state=42)
+train_set = [train_data.iloc[:,2:], train_data.iloc[:,0]]
+valid_set = [valid_data.iloc[:,2:], valid_data.iloc[:,0]]
+
+
+path = 'LF_bio_240625_best_018'
+threshold=0.6
+model = transtab.build_classifier_multi_task_onlyclss(cate_cols, num_cols, bin_cols)
+model.load('/home/hci/QYang/YQ_LiverFailure/transtab-main/checkpoint/'+path)
+
+prob_parent, encoder_output = transtab.evaluator.predict_all_prob(model, train_data.iloc[:, 2:],
+                                                               train_data.iloc[:, 1])
+lr = 0.02
+weight_decay = 1e-5
+weights = [1.0, 6.0, 16.0]
+
+clf = GateChildHead(
+    parent_classes=2,
+    weights=weights,
+    child_classes=3)
+
+optimizer = optim.Adam(
+    clf.parameters(),  # Pass the model's parameters to optimize
+    lr = lr,  # Learning rate # Coefficients for computing running averages of gradient and its square
+    eps = 1e-08,  # Term added to the denominator to improve numerical stability
+    weight_decay = weight_decay,  # Weight decay (L2 penalty)
+    amsgrad=False  )# Whether to use the AMSGrad variant of Adam
+
+
+
+prob_parent_test, encoder_output_test = transtab.evaluator.predict_all_prob(model, df_PHLF_valid_grade.iloc[:, 2:],
+                                                               df_PHLF_valid_grade.iloc[:, 1])
+prob_parent_valid, encoder_output_valid = transtab.evaluator.predict_all_prob(model, train_data.iloc[:, 2:],
+                                                               train_data.iloc[:, 1])
+epochs = 500
+count = 0
+for i in range(1000):
+    early_stopping = EarlyStopping()
+    for ep in range(epochs):
+        clf.train()
+        optimizer.zero_grad()
+        logits_child, loss_child = clf(encoder_output, train_data.iloc[:, 0], prob_parent, threshold)
+        loss_child.backward()
+        optimizer.step()  # Update the model's parameters
+
+        # print(f"Epoch [{ep + 1}/{epochs}], Loss: {loss_child.item():.4f}")
+        clf.eval()
+        with torch.no_grad():
+            logits_child, loss_child = clf(encoder_output_valid, train_data.iloc[:, 0],
+                                           prob_parent_valid, threshold)
+            logits_child = logits_child.detach().cpu().numpy()
+            # result_int_child, child_con = metrics_multiclass(df_PHLF_valid_grade.iloc[:, 0], logits_child)
+        metric_value, GradeBC, GradeA = custrm_metric(train_data.iloc[:, 0], logits_child)
+        early_stopping(metric_value)
+        if early_stopping.early_stop:
+            logits_child, loss_child = clf(encoder_output_test, df_PHLF_valid_grade.iloc[:, 0],
+                                           prob_parent_test, threshold)
+            logits_child = logits_child.detach().cpu().numpy()
+            result_int_child, child_con = metrics_multiclass(df_PHLF_valid_grade.iloc[:, 0], logits_child)
+            metric_value, GradeBC, GradeA = custrm_metric(df_PHLF_valid_grade.iloc[:, 0], logits_child)
+
+            print(result_int_child,'\n', child_con)
+            print(f"Early stopping at epoch {ep + 1}, metric_value is {metric_value}", '\n' )
+
+            if metric_value > 15 and GradeBC > 15 and GradeA > 20:
+                count += 1
+                torch.save(clf.state_dict(),'./checkpoint/'+path+'_grade_'+str(lr)+'_'+str(weight_decay)+'_'+
+                           str(weights)+'_'+str(count)+'.pth')
+                print('Model is saved in', './checkpoint/'+path+'_grade_'+str(lr)+'_'+str(weight_decay)+'_'+
+                           str(weights)+'_'+str(count)+'.pth')
+                print('===========================','\n')
+
+                with open('./results/'+path+'/Confusion_matrix/OnlyClass_result3.txt', 'a') as f:
+                    f.write(f'./checkpoint/'+path+'_grade_'+str(lr)+'_'+str(weight_decay)+'_'+
+                           str(weights)+'_'+str(count)+'.pth \n'
+                            f'{child_con}\n'
+                            f'{result_int_child} \t metric_value: {metric_value} \n'
+                            f'\n')
+            break
+
+
+
+
+
+
+
+
+
+# transtab.train_multi_task_only_class(clf, train_set, valid_set, **training_arguments)
+# prob_int_two = torch.tensor(np.column_stack((1-prob_int, prob_int))).to('cuda:0')
+
+
+
+
+
+
+
+
+# param_combinations = list(itertools.product(*param_grid.values()))
+# def evaluate_params(params):
+#     params_dict = dict(zip(param_grid.keys(), params))
+#     training_arguments.update(params_dict)
+#
+#
+#     model = transtab.build_classifier(cate_cols, num_cols, bin_cols, imb_weight=training_arguments['imb_weight'])
+#     model = model.to('cuda')
+#     transtab.train_multi_task(model, train_set, valid_set, **training_arguments)
+#     print(params)
+#
+#     y_test = pd.concat([df_PHLF_valid_grade.iloc[:, 1], df_PHLF_valid_grade.iloc[:, 0]], axis=1)
+#     prob_int_parent, prob_int_child = predict_multi_task(model, df_PHLF_valid_grade.iloc[:, 2:], y_test)
+#
+#     result_int_parent, parent_con = metrics_with_youden(df_PHLF_valid_grade.iloc[:, 1], prob_int_parent[:, 1])
+#     print('\n')
+#     result_int_child, child_con = metrics_multiclass(df_PHLF_valid_grade.iloc[:, 0], prob_int_child)
+#
+#     return result_int_parent, result_int_child,parent_con, child_con, model
+#
+# PATH = 'LF_bio_250220_best_0'
+# best_params = None
+# best_score = -float('inf')  # 我们是在最大化某个指标
+# count = 0
+# for params in param_combinations:
+#     result_int_parent, result_int_child, parent_con, child_con,model = evaluate_params(params)
+#     score = (float(result_int_parent[0])+float(result_int_child[0]))/2
+#     if score > best_score:
+#         best_score = score
+#         best_params = params
+#         best_model = model
+#
+#         model.save('./checkpoint/'+PATH + str(count))
+#         count += 1
+#         print('./checkpoint/'+PATH + str(count))
+#         with open('./results/'+PATH+'/parameters.txt', 'a') as f:
+#             f.write(str(best_params) + '\n' +
+#                     str(parent_con) + '\n' +
+#                     str(result_int_parent) + '\n'+
+#                     str(child_con)+'\n'+
+#                     str(result_int_child) + '\n' +
+#                     '\n')
+#         # torch.save(best_model, './checkpoint/LF_bio_240613_best.pth')
+#         print(best_params, '\n',
+#               '**************************************************************************************')
+# print("Best parameters found:", best_params,'\n', "Best score:",best_score)
+
+# model = transtab.build_classifier_multi_task(cate_cols, num_cols, bin_cols)
+# model.load('/home/hci/QYang/YQ_LiverFailure/transtab-main/checkpoint/'+PATH)
+
+
+
+
+
+
+
+#
+#
+# model.save('./checkpoint/'+PATH)
+#
+# best_params = None
+# best_score = -float('inf')  # 我们是在最大化某个指标
+# count = 0
+# for params in param_combinations:
+#     score, model, result_int, result_ext12, result_ext3 = evaluate_params(params)
+#
+#     if score > best_score:
+#         best_score = score
+#         best_params = params
+#         best_model = model
+#
+#         model.save('./checkpoint/'+PATH + str(count))
+#         count += 1
+#         print('./checkpoint/'+PATH + str(count))
+#         with open('./results/'+PATH+'.txt', 'a') as f:
+#             f.write(str(best_params) + '\n' +
+#                     str(result_int) + '\n' +
+#                     str(result_ext12) + '\n'+
+#                     str(result_ext3)+'\n'+'\n')
+#         # torch.save(best_model, './checkpoint/LF_bio_240613_best.pth')
+#         print(best_params, '\n',
+#               '**************************************************************************************')
+# print("Best parameters found:", best_params,'\n', "Best score:",best_score)
+
+
