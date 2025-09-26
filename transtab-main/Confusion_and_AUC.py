@@ -1,3 +1,8 @@
+'''
+这个代码是多模型对比的AUC曲线绘图代码
+结果呈现在 Fig.2 的单个子图
+'''
+
 import pandas as pd
 from sklearn.metrics import accuracy_score, recall_score, f1_score,roc_auc_score, confusion_matrix,\
     cohen_kappa_score, matthews_corrcoef, precision_score
