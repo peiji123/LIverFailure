@@ -1,3 +1,8 @@
+'''
+这部分代码就是 Confusion_and_AUC.py 的复制，用于major之后额外三个中心数据的AUC曲线绘图
+Fig.2 的子图 f,g,i
+'''
+
 import pandas as pd
 from sklearn.metrics import accuracy_score, recall_score, f1_score,roc_auc_score, confusion_matrix,\
     cohen_kappa_score, matthews_corrcoef, precision_score
