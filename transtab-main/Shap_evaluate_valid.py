@@ -1,3 +1,9 @@
+'''
+shap 系列图绘制的代码集成
+包含 summary plot => Fig.3 b
+force plot => Fig.3 d-e
+dependence plots => Fig.3 c
+'''
 import matplotlib.pyplot as plt
 import numpy as np
 import transtab
