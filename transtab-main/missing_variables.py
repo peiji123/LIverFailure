@@ -1,3 +1,6 @@
+'''
+计算缺失变量情况下 AUC的表现
+'''
 import pandas as pd
 import transtab
 import json
