@@ -1,3 +1,7 @@
+'''
+肝衰分等级（A 轻微，B/C 临床意义）AUC 曲线图
+Fig 6. a-b
+'''
 import pandas as pd
 import transtab
 import torch
