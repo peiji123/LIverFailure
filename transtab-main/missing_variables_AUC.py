@@ -1,3 +1,7 @@
+'''
+绘制缺失变量情况下的AUC图
+Fig. 7 b-c
+'''
 import pandas as pd
 import transtab
 import json
