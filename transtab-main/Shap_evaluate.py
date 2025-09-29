@@ -1,3 +1,7 @@
+'''
+shap value 获取的原始代码
+'''
+
 import transtab
 import pandas as pd
 from sklearn.model_selection import train_test_split
