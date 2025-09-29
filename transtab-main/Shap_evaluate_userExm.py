@@ -1,3 +1,7 @@
+'''
+人机对比AUC图绘制
+Fig 7. d
+'''
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.core.pylabtools import figsize
