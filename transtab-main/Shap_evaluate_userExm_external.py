@@ -1,3 +1,7 @@
+'''
+major 后修改了纳入队列的 人机对比实验AUC 图
+Fig 7.d
+'''
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.core.pylabtools import figsize
