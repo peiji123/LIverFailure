@@ -1,5 +1,6 @@
 '''
-忽略，没有纳入最后的版本
+多版本 t-sne 绘图
+最后保留的版本为 Fig. 3 a
 '''
 import pandas as pd
 import numpy as np
