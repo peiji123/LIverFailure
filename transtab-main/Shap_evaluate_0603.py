@@ -1,3 +1,6 @@
+'''
+0603 编号的model shap value 获取原始代码的 
+'''
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.core.pylabtools import figsize
