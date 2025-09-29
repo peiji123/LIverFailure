@@ -1,3 +1,6 @@
+'''
+忽略，实验性过程
+'''
 import matplotlib.pyplot as plt
 import datetime
 import transtab
